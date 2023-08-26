@@ -1,86 +1,104 @@
-import React, { useEffect, useState } from 'react';
-import { StyleSheet, View, TextInput, TouchableOpacity, Text } from 'react-native';
-import { GiftedChat, Message } from 'react-native-gifted-chat';
+import React, { useEffect, useState } from "react";
+import { View, StyleSheet } from "react-native";
+import { GiftedChat, InputToolbar, Message } from "react-native-gifted-chat";
+import {
+  collection,
+  query,
+  orderBy,
+  onSnapshot,
+  addDoc,
+} from "firebase/firestore";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const Chat = ({ route, navigation }) => {
-  const { name, backgroundColor } = route.params;
+const Chat = ({ route, navigation, database, isConnected }) => {
+  const { userId, userName, backgroundColor } = route.params;
 
   const [messages, setMessages] = useState([]);
-  const [inputText, setInputText] = useState('');
-  const [messageCounter, setMessageCounter] = useState(1); // Add this state for generating unique _id values
+  const [inputText, setInputText] = useState("");
 
   useEffect(() => {
-    navigation.setOptions({ title: name });
-    setMessages([
-      {
-        _id: messageCounter,
-        text: `Welcome to the chat, ${name}!`,
-        system: true,
-        createdAt: new Date(),
-      },
-      {
-        _id: messageCounter + 1,
-        text: 'Hello, this is a user message.',
-        createdAt: new Date(),
-        user: {
-          _id: 1,
-          name: name,
-        },
-      },
-    ]);
-    setMessageCounter(messageCounter + 2); // Increment counter for future messages
-  }, []);
+    navigation.setOptions({ title: userName });
 
-  const onSend = (newMessages = []) => {
-    // Generate unique _id values for new messages
-    const newMessageArray = newMessages.map((message) => ({
-      ...message,
-      _id: messageCounter + newMessages.indexOf(message),
-    }));
+    if (isConnected) {
+      const q = query(
+        collection(database, "messages"),
+        orderBy("createdAt", "desc")
+      );
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const fetchedMessages = snapshot.docs.map((doc) => {
+          const data = doc.data();
+          return {
+            _id: doc.id,
+            text: data.text,
+            createdAt: data.createdAt.toDate(),
+            user: data.user,
+          };
+        });
 
-    setMessages((prevMessages) =>
-      GiftedChat.append(prevMessages, newMessageArray)
-    );
-    setInputText('');
-    setMessageCounter(messageCounter + newMessages.length); // Increment counter for future messages
+        setMessages(fetchedMessages);
+
+        AsyncStorage.setItem("cachedMessages", JSON.stringify(fetchedMessages));
+      });
+
+      return () => unsubscribe();
+    } else {
+      AsyncStorage.getItem("cachedMessages").then((cachedMessages) => {
+        if (cachedMessages) {
+          setMessages(JSON.parse(cachedMessages));
+        }
+      });
+    }
+  }, [database, isConnected]);
+
+  const renderInputToolbar = (props) => {
+    if (isConnected) {
+      return <InputToolbar {...props} />;
+    } else {
+      return null;
+    }
+  };
+
+  const onSend = (newMessages) => {
+    addDoc(collection(database, "messages"), {
+      text: newMessages[0].text,
+      createdAt: new Date(),
+      user: {
+        _id: userId,
+        name: userName,
+      },
+    });
+
+    setInputText("");
   };
 
   return (
     <View style={[styles.container, { backgroundColor: backgroundColor }]}>
       <GiftedChat
         messages={messages}
-        onSend={(newMessages) => onSend(newMessages)}
+        onSend={onSend}
         user={{
-          _id: 1,
-          name: name,
+          _id: userId,
+          name: userName,
         }}
         listViewProps={{
           style: { paddingTop: 20 },
         }}
-        renderInputToolbar={() => (
-          <View style={styles.inputContainer}>
-            <TextInput
-              style={styles.input}
-              multiline
-              placeholder="Type a message..."
-              value={inputText}
-              onChangeText={setInputText}
-            />
-            <TouchableOpacity
-              style={styles.sendButton}
-              onPress={() =>
-                onSend([{ text: inputText, user: { _id: 1 } }])
-              }
-            >
-              <Text style={styles.sendButtonText}>Send</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+        renderInputToolbar={renderInputToolbar}
+        // ...
         renderMessage={(props) => {
-          const textStyle = {
-            color: 'white',
-          };
-          return <Message {...props} textStyle={textStyle} />;
+          return (
+            <Message
+              {...props}
+              containerStyle={styles.inputContainer}
+              textInputStyle={styles.input}
+              renderInputToolbar={(props) => (
+                <InputToolbar
+                  {...props}
+                  containerStyle={styles.inputToolbarContainer}
+                />
+              )}
+            />
+          );
         }}
       />
     </View>
@@ -92,34 +110,37 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderTopWidth: 1,
-    borderTopColor: '#ccc',
-    marginTop: -20,
+    backgroundColor: "white",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderTopWidth: 0,
+    borderBottomWidth: 0,
+    marginBottom: 10,
+  },
+  inputToolbarContainer: {
+    backgroundColor: "#F2F2F2",
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    borderTopWidth: 0,
+    borderBottomWidth: 0,
   },
   input: {
-    flex: 1,
-    padding: 10,
-    borderRadius: 24,
-    backgroundColor: '#F2F2F2',
-    color: '#333',
-    marginRight: 10,
+    color: "#333",
   },
   sendButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: "#007AFF",
     borderRadius: 20,
     paddingVertical: 8,
     paddingHorizontal: 15,
-    justifyContent: 'center',
+    justifyContent: "center",
   },
   sendButtonText: {
-    color: 'white',
+    color: "white",
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
 });
+
 
 export default Chat;
