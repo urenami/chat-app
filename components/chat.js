@@ -1,200 +1,165 @@
-import React, { useEffect, useState } from "react";
-import { View, StyleSheet, Alert } from "react-native";
-import { GiftedChat, InputToolbar, Message } from "react-native-gifted-chat";
+import { useState, useEffect } from "react";
 import {
-  collection,
-  query,
-  orderBy,
-  onSnapshot,
+  StyleSheet,
+  View,
+  Platform,
+  KeyboardAvoidingView,
+  Alert,
+} from "react-native";
+import { GiftedChat, Bubble, InputToolbar } from "react-native-gifted-chat";
+import {
   addDoc,
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
 } from "firebase/firestore";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import CustomActions from "./customactions";
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'; 
-import * as ImagePicker from 'expo-image-picker'; 
-import * as Location from 'expo-location';  
+import MapView from "react-native-maps";
 
-const Chat = ({ route, navigation, database, storage, isConnected }) => {
-  const { userId, userName, backgroundColor } = route.params;
+// Async Storage
 
-  const [messages, setMessages] = useState([]);
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-  const generateReference = (uri) => {
-    const timeStamp = (new Date()).getTime();
-    const imageName = uri.split("/")[uri.split("/").length - 1];
-    return `${userId}-${timeStamp}-${imageName}`;
+const Chat = ({ route, navigation, db, isConnected, storage }) => {
+  const { name, backgroundColor, uid } = route.params; // gets name, colour and User ID from route.params
+  const [messages, setMessages] = useState([]); // sets message state
+
+  // function to load cached messages
+  const loadCachedMessages = async () => {
+    const cachedMessages = (await AsyncStorage.getItem("messages")) || "[]";
+    setMessages(JSON.parse(cachedMessages));
   };
 
-  const uploadAndSendImage = async (imageURI) => {
-    const uniqueRefString = generateReference(imageURI);
-    const newUploadRef = ref(storage, uniqueRefString);
-    const response = await fetch(imageURI);
-    const blob = await response.blob();
-    uploadBytes(newUploadRef, blob).then(async (snapshot) => {
-      const imageURL = await getDownloadURL(snapshot.ref)
-      onSend([{ image: imageURL }]);
-    });
-  };
-
-  const pickImage = async () => {
-    let permissions = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (permissions?.granted) {
-      let result = await ImagePicker.launchImageLibraryAsync();
-      if (!result.cancelled) await uploadAndSendImage(result.uri);
-      else Alert.alert("Permissions haven't been granted.");
-    }
-  };
-
-  const takePhoto = async () => {
-    let permissions = await ImagePicker.requestCameraPermissionsAsync();
-    if (permissions?.granted) {
-      let result = await ImagePicker.launchCameraAsync();
-      if (!result.cancelled) await uploadAndSendImage(result.uri);
-      else Alert.alert("Permissions haven't been granted.");
-    }
-  };
-
-  const getLocation = async () => {
-    let permissions = await Location.requestForegroundPermissionsAsync();
-    if (permissions?.granted) {
-      const location = await Location.getCurrentPositionAsync({});
-      if (location) {
-        onSend({
-          location: {
-            longitude: location.coords.longitude,
-            latitude: location.coords.latitude,
-          },
-        });
-      } else Alert.alert("Error occurred while fetching location");
-    } else Alert.alert("Permissions haven't been granted.");
-  };
+  let unsubMessages;
 
   useEffect(() => {
-    navigation.setOptions({ title: userName });
+    // set navigation options for the title
+    navigation.setOptions({ title: name });
 
-    if (isConnected) {
-      const q = query(
-        collection(database, "messages"),
-        orderBy("createdAt", "desc")
-      );
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const fetchedMessages = snapshot.docs.map((doc) => {
-          const data = doc.data();
-          return {
-            _id: doc.id,
-            text: data.text,
-            createdAt: data.createdAt.toDate(),
-            user: data.user,
-          };
+    if (isConnected === true) {
+      // if a connection exists
+      if (unsubMessages) unsubMessages();
+      unsubMessages = null;
+
+      // Create a query to get the messages collection ordered by createdAt in descending order
+      const q = query(collection(db, "messages"), orderBy("createdAt", "desc"));
+      unsubMessages = onSnapshot(q, (documentsSnapshot) => {
+        let newMessages = [];
+        documentsSnapshot.forEach((doc) => {
+          newMessages.push({
+            id: doc.id,
+            ...doc.data(),
+            createdAt: new Date(doc.data().createdAt.toMillis()), // convert createdAt to Date object })
+          });
         });
-
-        setMessages(fetchedMessages);
-
-        AsyncStorage.setItem("cachedMessages", JSON.stringify(fetchedMessages));
+        cachedMessages(newMessages);
+        setMessages(newMessages);
       });
+    } else loadCachedMessages();
 
-      return () => unsubscribe();
-    } else {
-      AsyncStorage.getItem("cachedMessages").then((cachedMessages) => {
-        if (cachedMessages) {
-          setMessages(JSON.parse(cachedMessages));
-        }
-      });
-    }
-  }, [database, isConnected]);
+    // Clean up function
+    return () => {
+      if (unsubMessages) {
+        unsubMessages();
+      }
+    };
+  }, [isConnected]);
 
-  const renderInputToolbar = (props) => {
-    if (isConnected) {
-      return <InputToolbar {...props} />;
-    } else {
-      return null;
+  // function to cache messages
+  const cachedMessages = async (messagesToCache) => {
+    try {
+      await AsyncStorage.setItem("messages", JSON.stringify(messagesToCache));
+    } catch (error) {
+      console.log(error.message);
     }
   };
 
-  const onSend = (newMessages = []) => {
-    if (newMessages.length > 0) {
-      addDoc(collection(database, "messages"), {
-        text: newMessages[0].text,
-        createdAt: new Date(),
-        user: {
-          _id: userId,
-          name: userName,
-        },
-      });
-    }
+  // renderInputToolbar function
+  const renderInputToolbar = (props) => {
+    if (isConnected) return <InputToolbar {...props} />;
+    else return null;
   };
 
   const renderCustomActions = (props) => {
-    return <CustomActions
-      {...props}
-      onPickImage={pickImage}  
-      onTakePhoto={takePhoto}   
-      onGetLocation={getLocation} 
-    />;
+    return <CustomActions storage={storage} {...props} />;
+  };
+
+  const onSend = (newMessages) => {
+    addDoc(collection(db, "messages"), newMessages[0]);
+  };
+
+  const renderBubble = (props) => {
+    return (
+      <Bubble
+        {...props}
+        wrapperStyle={{
+          right: {
+            backgroundColor: "#000", // change the background color of the right side chat bubble to black
+          },
+          left: {
+            backgroundColor: "#fff", // change the background color of the left side chat bubble to white
+          },
+        }}
+        textStyle={{
+          right: {
+            color: "#fff", // change the text color of the right side chat to white
+          },
+          left: {
+            color: "#000", // change the text color of the left side to black
+          },
+        }}
+      />
+    );
+  };
+
+  const renderCustomView = (props) => {
+    const { currentMessage } = props;
+    if (currentMessage.location) {
+      return (
+        <MapView
+          style={{ width: 150, height: 100, borderRadius: 13, margin: 3 }}
+          region={{
+            latitude: currentMessage.location.latitude,
+            longitude: currentMessage.location.longitude,
+            latitudeDelta: 0.0922,
+            longitudeDelta: 0.0421,
+          }}
+        />
+      );
+    }
+    return null;
   };
 
   return (
     <View style={[styles.container, { backgroundColor: backgroundColor }]}>
       <GiftedChat
         messages={messages}
+        renderBubble={renderBubble}
         onSend={onSend}
+        renderActions={renderCustomActions}
+        renderCustomView={renderCustomView}
         user={{
-          _id: userId,
-          name: userName,
-        }}
-        listViewProps={{
-          style: { paddingTop: 20 },
+          _id: uid,
+          name: name,
         }}
         renderInputToolbar={renderInputToolbar}
-        renderActions={renderCustomActions}
-        renderMessage={(props) => {
-          return (
-            <Message
-              {...props}
-              containerStyle={styles.inputContainer}
-              textInputStyle={styles.input}
-            />
-          );
-        }}
+        placeholder="Type a message..."
       />
+      {Platform.OS === "android" ? (
+        <KeyboardAvoidingView behavior="height" />
+      ) : null}
+      {Platform.OS === "ios" ? (
+        <KeyboardAvoidingView behavior="padding" />
+      ) : null}
     </View>
   );
 };
 
+// styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  inputContainer: {
-    backgroundColor: "white",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderTopWidth: 0,
-    borderBottomWidth: 0,
-    marginBottom: 10,
-  },
-  inputToolbarContainer: {
-    backgroundColor: "#F2F2F2",
-    borderRadius: 20,
-    paddingHorizontal: 8,
-    borderTopWidth: 0,
-    borderBottomWidth: 0,
-  },
-  input: {
-    color: "#333",
-  },
-  sendButton: {
-    backgroundColor: "#007AFF",
-    borderRadius: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    justifyContent: "center",
-  },
-  sendButtonText: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "bold",
   },
 });
 
