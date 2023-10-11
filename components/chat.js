@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import {
   StyleSheet,
   View,
@@ -16,16 +16,13 @@ import {
 } from "firebase/firestore";
 import CustomActions from "./customactions";
 import MapView from "react-native-maps";
-
-// Async Storage
-
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const Chat = ({ route, navigation, db, isConnected, storage }) => {
-  const { name, backgroundColor, uid } = route.params; // gets name, colour and User ID from route.params
+  const { name, backgroundColor, uid } = route.params; // gets name, colour, and User ID from route.params
   const [messages, setMessages] = useState([]); // sets message state
 
-  // function to load cached messages
+  // Function to load cached messages
   const loadCachedMessages = async () => {
     const cachedMessages = (await AsyncStorage.getItem("messages")) || "[]";
     setMessages(JSON.parse(cachedMessages));
@@ -34,29 +31,37 @@ const Chat = ({ route, navigation, db, isConnected, storage }) => {
   let unsubMessages;
 
   useEffect(() => {
-    // set navigation options for the title
+    // Set navigation options for the title
     navigation.setOptions({ title: name });
 
     if (isConnected === true) {
-      // if a connection exists
+      // If a connection exists
       if (unsubMessages) unsubMessages();
       unsubMessages = null;
 
       // Create a query to get the messages collection ordered by createdAt in descending order
-      const q = query(collection(db, "messages"), orderBy("createdAt", "desc"));
+      const q = query(
+        collection(db, "messages"),
+        orderBy("createdAt", "desc")
+      );
       unsubMessages = onSnapshot(q, (documentsSnapshot) => {
         let newMessages = [];
         documentsSnapshot.forEach((doc) => {
+          const messageData = doc.data();
           newMessages.push({
-            id: doc.id,
-            ...doc.data(),
-            createdAt: new Date(doc.data().createdAt.toMillis()), // convert createdAt to Date object })
+            _id: doc.id,
+            ...messageData,
+            createdAt: new Date(messageData.createdAt.toMillis()),
+            // Assign a unique key based on the Firestore document ID
+            key: doc.id,
           });
         });
         cachedMessages(newMessages);
         setMessages(newMessages);
       });
-    } else loadCachedMessages();
+    } else {
+      loadCachedMessages();
+    }
 
     // Clean up function
     return () => {
@@ -66,7 +71,7 @@ const Chat = ({ route, navigation, db, isConnected, storage }) => {
     };
   }, [isConnected]);
 
-  // function to cache messages
+  // Function to cache messages
   const cachedMessages = async (messagesToCache) => {
     try {
       await AsyncStorage.setItem("messages", JSON.stringify(messagesToCache));
@@ -75,7 +80,7 @@ const Chat = ({ route, navigation, db, isConnected, storage }) => {
     }
   };
 
-  // renderInputToolbar function
+  // Render input toolbar function
   const renderInputToolbar = (props) => {
     if (isConnected) return <InputToolbar {...props} />;
     else return null;
@@ -95,18 +100,18 @@ const Chat = ({ route, navigation, db, isConnected, storage }) => {
         {...props}
         wrapperStyle={{
           right: {
-            backgroundColor: "#000", // change the background color of the right side chat bubble to black
+            backgroundColor: "#000", // Change the background color of the right-side chat bubble to black
           },
           left: {
-            backgroundColor: "#fff", // change the background color of the left side chat bubble to white
+            backgroundColor: "#fff", // Change the background color of the left-side chat bubble to white
           },
         }}
         textStyle={{
           right: {
-            color: "#fff", // change the text color of the right side chat to white
+            color: "#fff", // Change the text color of the right-side chat to white
           },
           left: {
-            color: "#000", // change the text color of the left side to black
+            color: "#000", // Change the text color of the left-side chat to black
           },
         }}
       />
